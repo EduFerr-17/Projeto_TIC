@@ -1,0 +1,26 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Blood Pressure Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        async function fetchBP() {
+            const res = await fetch('/get_bp');
+            const data = await res.json();
+            document.getElementById('bp').textContent = `${data.systolic} / ${data.diastolic} mmHg`;
+            document.getElementById('pulse').textContent = `Pulse: ${data.pulse} bpm`;
+        }
+
+        setInterval(fetchBP, 5000); // update every 5 seconds
+        window.onload = fetchBP;
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Blood Pressure</h1>
+        <div id="bp" class="reading">-- / -- mmHg</div>
+        <div id="pulse" class="pulse">Pulse: -- bpm</div>
+    </div>
+</body>
+</html>

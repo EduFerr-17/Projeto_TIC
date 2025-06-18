@@ -1,0 +1,29 @@
+/* static/style.css */
+body {
+    background-color: #1a1a1a;
+    color: white;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+.container {
+    text-align: center;
+    background-color: #222;
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 0 20px rgba(0,255,0,0.4);
+}
+
+.reading {
+    font-size: 48px;
+    margin: 20px 0;
+    color: #0f0;
+}
+
+.pulse {
+    font-size: 24px;
+    color: #0ff;
+}

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Measurement Result</title>
+    <link rel="stylesheet" href="/static/result.css">
+</head>
+<body>
+    <div class="monitor-container">
+        <div class="monitor-title">Blood Pressure Result</div>
+        <div class="label">Systolic</div>
+        <div class="reading">{{ SBP }}</div>
+        <div class="label">Diastolic</div>
+        <div class="reading">{{ DBP }}</div>
+        <div class="label">Pulse</div>
+        <div class="reading">{{ pulse }}</div>
+        <div class="separator"></div>
+        <div class="timestamp">{{ timestamp }}</div>
+        <a href="/" class="back-button">Back</a>
+    </div>
+</body>
+</html>

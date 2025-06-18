@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood Pressure Calendar</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.8/index.global.min.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            padding: 20px;
+            background-color: #f0f8ff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        #calendar {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .averages-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            text-align: center;
+            color: #0077cc;
+            margin-bottom: 20px;
+        }
+
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 12px 24px;
+            background-color: #0077cc;
+            color: white;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #005fa3;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .chart-container {
+            max-width: 800px;
+            margin: 20px auto;
+            position: relative;
+            height: 400px;
+        }
+
+        .averages-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .averages-table th,
+        .averages-table td {
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .averages-table th {
+            background-color: #0077cc;
+            color: white;
+            font-weight: bold;
+        }
+
+        .averages-table tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        .status-message {
+            text-align: center;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .navigation {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .navigation a {
+            color: #0077cc;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: bold;
+        }
+
+        .period-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .period-controls label {
+            font-weight: bold;
+            color: #0077cc;
+        }
+
+        .period-controls select,
+        .period-controls input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .period-controls button {
+            margin: 0;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="navigation">
+            <a href="/">Home</a>
+            <a href="/measure">New Measurement</a>
+            <a href="/calendar">Calendar</a>
+        </div>
+
+        <div id="calendar">
+            <h2>Blood Pressure Measurements Calendar</h2>
+            <div id="fullcalendar"></div>
+        </div>
+
+        <div class="averages-section">
+            <h2>Daily Averages</h2>
+            <div class="period-controls">
+                <label for="period-select">View Period:</label>
+                <select id="period-select" onchange="updatePeriod()">
+                    <option value="week">This Week</option>
+                    <option value="month" selected>This Month</option>
+                </select>
+                
+                <label for="date-input">Date:</label>
+                <input type="date" id="date-input" onchange="updatePeriod()">
+                
+                <button onclick="loadDailyAverages()">Load Daily Averages</button>
+            </div>
+            
+            <div id="daily-status-message"></div>
+            
+            <div class="chart-container">
+                <canvas id="dailyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="averages-section">
+            <h2>Monthly Averages</h2>
+            <button id="calculate-averages" onclick="calculateMonthlyAverages()">
+                Calculate Monthly Averages
+            </button>
+            
+            <div id="status-message"></div>
+            
+            <div class="chart-container">
+                <canvas id="averagesChart"></canvas>
+            </div>
+            
+            <div id="averages-table-container"></div>
+        </div>
+    </div>
+
+    <script>
+        let calendar;
+        let averagesChart;
+        let dailyChart;
+
+        // Initialize the calendar when page loads
+        document.addEventListener('DOMContentLoaded', async function() {
+            await initializeCalendar();
+            initializeDateInput();
+            loadDailyAverages(); // Load current month by default
+        });
+
+        async function initializeCalendar() {
+            const calendarEl = document.getElementById('fullcalendar');
+            
+            // Load measurements from API
+            let calendarEvents = [];
+            try {
+                const response = await fetch('/api/measurements');
+                const data = await response.json();
+                
+                if (data.measurements && data.measurements.length > 0) {
+                    calendarEvents = data.measurements.map(measurement => ({
+                        title: `SBP: ${measurement.sbp} | DBP: ${measurement.dbp} | Pulse: ${measurement.pulse}`,
+                        start: `${measurement.date}T${measurement.time}`,
+                        extendedProps: {
+                            SBP: measurement.sbp,
+                            DBP: measurement.dbp,
+                            Pulse: measurement.pulse,
+                            Date: measurement.date,
+                            Time: measurement.time
+                        }
+                    }));
+                    console.log(`Loaded ${calendarEvents.length} events for calendar`);
+                } else {
+                    console.log('No measurements found for calendar');
+                }
+            } catch (error) {
+                console.error('Error loading calendar events:', error);
+            }
+            
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,dayGridWeek'
+                },
+                events: calendarEvents,
+                eventClick: function(info) {
+                    const props = info.event.extendedProps;
+                    alert(`Blood Pressure Reading:
+Date: ${props.Date}
+Time: ${props.Time}
+SBP: ${props.SBP} mmHg
+DBP: ${props.DBP} mmHg
+Pulse: ${props.Pulse} bpm`);
+                },
+                eventColor: '#0077cc'
+            });
+            
+            calendar.render();
+        }
+
+        async function calculateMonthlyAverages() {
+            const button = document.getElementById('calculate-averages');
+            const statusDiv = document.getElementById('status-message');
+            
+            // Show loading state
+            button.disabled = true;
+            button.textContent = 'Calculating...';
+            showStatus('Fetching measurement data...', 'info');
+            
+            try {
+                console.log('Fetching monthly averages from API...');
+                const response = await fetch('/api/monthly-averages');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('API Response:', data);
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (!data.monthly_averages || data.monthly_averages.length === 0) {
+                    showStatus('No measurements found. Please take some measurements first.', 'info');
+                    return;
+                }
+                
+                console.log(`Found ${data.monthly_averages.length} months of data`);
+                
+                // Display the results
+                displayMonthlyAverages(data.monthly_averages);
+                createChart(data.monthly_averages);
+                showStatus(`Successfully calculated averages for ${data.monthly_averages.length} months`, 'success');
+                
+            } catch (error) {
+                console.error('Error calculating monthly averages:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                // Reset button state
+                button.disabled = false;
+                button.textContent = 'Calculate Monthly Averages';
+            }
+        }
+
+        function displayMonthlyAverages(averages) {
+            const container = document.getElementById('averages-table-container');
+            
+            let tableHtml = `
+                <table class="averages-table">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Avg SBP (mmHg)</th>
+                            <th>Avg DBP (mmHg)</th>
+                            <th>Avg Pulse (bpm)</th>
+                            <th>Measurements</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            averages.forEach(avg => {
+                tableHtml += `
+                    <tr>
+                        <td>${avg.month_name}</td>
+                        <td>${avg.avg_sbp}</td>
+                        <td>${avg.avg_dbp}</td>
+                        <td>${avg.avg_pulse}</td>
+                        <td>${avg.count}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += `
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = tableHtml;
+        }
+
+        function createChart(averages) {
+            const ctx = document.getElementById('averagesChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (averagesChart) {
+                averagesChart.destroy();
+            }
+            
+            // Reverse the order for chronological display (oldest to newest)
+            const reversedAverages = [...averages].reverse();
+            
+            averagesChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: reversedAverages.map(avg => avg.month_name),
+                    datasets: [
+                        {
+                            label: 'Systolic BP (mmHg)',
+                            data: reversedAverages.map(avg => avg.avg_sbp),
+                            borderColor: '#ff6384',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            fill: false,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Diastolic BP (mmHg)',
+                            data: reversedAverages.map(avg => avg.avg_dbp),
+                            borderColor: '#36a2eb',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            fill: false,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Pulse (bpm)',
+                            data: reversedAverages.map(avg => avg.avg_pulse),
+                            borderColor: '#4bc0c0',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            fill: false,
+                            tension: 0.1,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Blood Pressure (mmHg)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Pulse (bpm)'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Monthly Blood Pressure Averages'
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status-message');
+            statusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
+            
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // Debug function to test API connectivity
+        async function debugAPI() {
+            try {
+                console.log('Testing /api/measurements endpoint...');
+                const response = await fetch('/api/measurements');
+                const data = await response.json();
+                console.log('Measurements API response:', data);
+                
+                console.log('Testing /debug/csv endpoint...');
+                const csvResponse = await fetch('/debug/csv');
+                const csvText = await csvResponse.text();
+                console.log('CSV Debug response:', csvText);
+                
+            } catch (error) {
+                console.error('Debug API test failed:', error);
+            }
+        }
+
+        function initializeDateInput() {
+            // Set date input to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('date-input').value = today;
+        }
+
+        function updatePeriod() {
+            // Called when period or date changes
+            loadDailyAverages();
+        }
+
+        async function loadDailyAverages() {
+            const period = document.getElementById('period-select').value;
+            const date = document.getElementById('date-input').value;
+            const statusDiv = document.getElementById('daily-status-message');
+            
+            showDailyStatus('Loading daily averages...', 'info');
+            
+            try {
+                console.log(`Fetching daily averages for ${period} around ${date}...`);
+                const response = await fetch(`/api/daily-averages?period=${period}&date=${date}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Daily averages API response:', data);
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (!data.daily_averages || data.daily_averages.length === 0) {
+                    showDailyStatus('No measurements found for this period.', 'info');
+                    return;
+                }
+                
+                // Count days with actual measurements
+                const daysWithData = data.daily_averages.filter(day => day.count > 0).length;
+                
+                createDailyChart(data.daily_averages, data.period_name);
+                showDailyStatus(`Showing ${data.period_name} (${daysWithData} days with measurements)`, 'success');
+                
+            } catch (error) {
+                console.error('Error loading daily averages:', error);
+                showDailyStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function createDailyChart(dailyData, periodName) {
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (dailyChart) {
+                dailyChart.destroy();
+            }
+            
+            // Prepare data - only include days with measurements for the line
+            const labels = dailyData.map(day => day.display_date);
+            const sbpData = dailyData.map(day => day.avg_sbp);
+            const dbpData = dailyData.map(day => day.avg_dbp);
+            const pulseData = dailyData.map(day => day.avg_pulse);
+            
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Systolic BP (mmHg)',
+                            data: sbpData,
+                            borderColor: '#ff6384',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            fill: false,
+                            tension: 0.1,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            connectNulls: false // Don't connect points across null values
+                        },
+                        {
+                            label: 'Diastolic BP (mmHg)',
+                            data: dbpData,
+                            borderColor: '#36a2eb',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            fill: false,
+                            tension: 0.1,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            connectNulls: false
+                        },
+                        {
+                            label: 'Pulse (bpm)',
+                            data: pulseData,
+                            borderColor: '#4bc0c0',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            fill: false,
+                            tension: 0.1,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            connectNulls: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Daily Blood Pressure Averages - ${periodName}`,
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    const index = context[0].dataIndex;
+                                    const day = dailyData[index];
+                                    return `${day.day_name}, ${day.date}`;
+                                },
+                                afterBody: function(context) {
+                                    const index = context[0].dataIndex;
+                                    const day = dailyData[index];
+                                    if (day.count > 0) {
+                                        return `Measurements: ${day.count}`;
+                                    }
+                                    return 'No measurements';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Blood Pressure (mmHg)'
+                            },
+                            min: 40,
+                            max: 180
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Pulse (bpm)'
+                            },
+                            min: 40,
+                            max: 120,
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            });
+        }
+
+        function showDailyStatus(message, type) {
+            const statusDiv = document.getElementById('daily-status-message');
+            statusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
+            
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 5000);
+            }
+        }
+    </script>
+</body>
+</html>

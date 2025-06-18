@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood Pressure Monitor</title>
+    <!-- Link to external CSS file using Flask's url_for -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+</head>
+<body>
+    <h1>Blood Pressure Monitor</h1>
+    
+    <div class="main-container">
+        <div>
+            <a href="/measure">
+                <button type="button">Start Measurement</button>
+            </a>
+            <a href="/calendar">
+                <button type="button">View History</button>
+            </a>
+        </div>
+    </div>
+
+    <footer>
+        <p>Powered by Your App</p>
+    </footer>
+</body>
+</html>
