@@ -89,43 +89,71 @@ void loop() {
     client.flush();
 
     if (request.indexOf("GET /start") != -1) {
-      Serial.println("Starting data stream...");
+  float initialPressure = readCuffPressure();
 
-      client.println("HTTP/1.1 200 OK");
-      client.println("Content-Type: application/json");
-      client.println("Connection: close");
-      client.println();
-      client.print("{\"pressure_data\":[");
 
-      unsigned long startTime = millis();
-      int sampleCount = 0;
-      bool firstValue = true;
 
-      //Limiting the number of measurements saved at one time, to not use to much RAM from the microcontroller
-      //The data is sent in chunks, in the python application each chunk is reconected for each measurement instance
+  Serial.print("Initial pressure: ");
+  Serial.println(initialPressure);
 
-      while ((millis() - startTime < MEASURE_TIME) && sampleCount < MAX_SAMPLES) { 
-        float pressure = readCuffPressure();
-        pressureBuffer[bufferIndex++] = pressure;
-        sampleCount++;
+  // Check if the pressure is within acceptable bounds
+  if (initialPressure < 140.0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.print("{\"status\":\"low_pressure\"}");
+    Serial.println("Measurement not started: pressure too low.");
+    return;
+  }
 
-        if (bufferIndex == CHUNK_SIZE || sampleCount == MAX_SAMPLES || (millis() - startTime >= MEASURE_TIME)) {
-          // Send the buffered chunk
-          for (int i = 0; i < bufferIndex; i++) {
-            if (!firstValue) {
-              client.print(",");
-            }
-            client.print(pressureBuffer[i], 2);
-            firstValue = false;
-          }
-          bufferIndex = 0;
+  if (initialPressure > 180.0) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.print("{\"status\":\"high_pressure\"}");
+    Serial.println("Measurement not started: pressure too high.");
+    return;
+  }
+
+  // If pressure is acceptable, start streaming data
+  Serial.println("Pressure OK. Starting measurement...");
+
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
+  client.println("Connection: close");
+  client.println();
+  client.print("{\"status\":\"ok\",\"pressure_data\":[");
+
+  unsigned long startTime = millis();
+  int sampleCount = 0;
+  int bufferIndex = 0;
+  bool firstValue = true;
+
+  while ((millis() - startTime < MEASURE_TIME) && sampleCount < MAX_SAMPLES) {
+    float pressure = readCuffPressure();
+    pressureBuffer[bufferIndex++] = pressure;
+    sampleCount++;
+
+    if (bufferIndex == CHUNK_SIZE || sampleCount == MAX_SAMPLES || (millis() - startTime >= MEASURE_TIME)) {
+      for (int i = 0; i < bufferIndex; i++) {
+        if (!firstValue) {
+          client.print(",");
         }
-
-        delay(INTERVAL);
+        client.print(pressureBuffer[i], 2);
+        firstValue = false;
       }
+      bufferIndex = 0;
+    }
 
-      client.println("]}");
-      Serial.println("Data stream complete.");
+    delay(INTERVAL);
+  }
+
+  client.println("]}");
+  Serial.println("Data stream complete.");
+}
+
     } else {
       // Default response
       client.println("HTTP/1.1 200 OK");
@@ -140,9 +168,9 @@ void loop() {
 
     delay(1);
     client.stop();
-    Serial.println("Client disconnected");
+    //Serial.println("Client disconnected");
   }
-}
+
 
 float readCuffPressure() {
   int analogValue = analogRead(SENSOR_PIN);  //Gives value in analog, 1 to 1023
