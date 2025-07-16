@@ -97,7 +97,7 @@ void loop() {
   Serial.println(initialPressure);
 
   // Check if the pressure is within acceptable bounds
-  if (initialPressure < 140.0) {
+  if (initialPressure < 180.0) {
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: application/json");
     client.println("Connection: close");
@@ -107,7 +107,7 @@ void loop() {
     return;
   }
 
-  if (initialPressure > 180.0) {
+  if (initialPressure > 200.0) {
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: application/json");
     client.println("Connection: close");
