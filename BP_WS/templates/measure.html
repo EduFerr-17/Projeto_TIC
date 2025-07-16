@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Start Measurement</title>
     <!-- Link to the external measure.css file -->
-    <link rel="stylesheet" href="/static/measure.css"> <!-- Adjust path if needed -->
+    <link rel="stylesheet" href="/static/measure.css">
 </head>
 <body>
     <h2>Start Measurement</h2>
 
     <!-- Measurement Form -->
     <div class="form-container">
+        {% if message %}
+            <div class="status-message">{{ message }}</div>
+        {% endif %}
         <form method="POST" action="/measure">
             <input type="text" name="patient_name" placeholder="Enter Patient Name" required>
             <button type="submit">Start Measurement</button>

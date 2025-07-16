@@ -31,6 +31,17 @@ h2 {
     margin: auto;
 }
 
+/* Status message styling */
+.status-message {
+    color: #b30000;
+    background: #ffeaea;
+    border: 1px solid #ffb3b3;
+    padding: 10px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    text-align: center;
+}
+
 /* Form styling */
 input, button {
     padding: 10px;

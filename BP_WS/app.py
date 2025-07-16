@@ -62,72 +62,71 @@ def receive_data():
 @app.route("/measure", methods=["GET", "POST"])
 def measure():
     global measurement_in_progress
-    
+
+    message = None
+
     if request.method == "POST":
-        # Check if a measurement is already in progress
         with measurement_lock:
             if measurement_in_progress:
-                print("Measurement already in progress - ignoring duplicate request")
-                return "A measurement is already in progress. Please wait..."
-            
-            # Set the flag to indicate measurement is starting
+                message = "A measurement is already in progress. Please wait..."
+                return render_template("measure.html", message=message)
             measurement_in_progress = True
-        
+
         try:
-            
+            # Replace with your Arduino's actual IP and endpoint
             arduino_ip = "http://192.168.75.148/start"
             print(f"Starting new measurement - Sending GET to {arduino_ip}")
             r = requests.get(arduino_ip, timeout=120)
 
             if r.status_code == 200:
                 arduino_data = r.json()
+                # Check for low pressure status
+                if arduino_data.get("status") == "low_pressure":
+                    message = "Pressure too low. Please inflate the cuff and try again."
+                    measurement_in_progress = False
+                    return render_template("measure.html", message=message)
+                
+                if arduino_data.get("status") == "high_pressure":
+                    message = "Pressure too high. Please desinflate the cuff and try again."
+                    measurement_in_progress = False
+                    return render_template("measure.html", message=message)
+
                 pressure_data = arduino_data.get("pressure_data")
-
                 if not pressure_data:
-                    return "Arduino response does not contain pressure data."
+                    message = "Arduino response does not contain pressure data."
+                    measurement_in_progress = False
+                    return render_template("measure.html", message=message)
 
-                print(f"Received complete pressure data with {len(pressure_data)} samples")
+                # Analyze pressure data
+                SBP, DBP, pulse, timestamp = Blood_Pressure(pressure_data)
 
-                # Call internal /analyze_pressure API
-                analysis_url = "http://localhost:5000/analyze_pressure"
-                analysis_response = requests.post(analysis_url, json={"pressure_data": pressure_data})
+                # Save measurement to CSV
+                now = datetime.now()
+                date_str = now.strftime("%Y-%m-%d")
+                time_str = now.strftime("%H:%M:%S")
+                patient_name = request.form.get("patient_name", "Unknown")
 
-                if analysis_response.status_code == 200:
-                    result = analysis_response.json()
-                    SBP = result["SBP"]
-                    DBP = result["DBP"]
-                    pulse = result["Pulse"]
-                    timestamp = result["timestamp"]
+                with open(DATA_FILE, "a", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([date_str, time_str, patient_name, SBP, DBP, pulse])
 
-                    # Save to CSV - only once per measurement
-                    now = datetime.now()
-                    date_str = now.strftime("%Y-%m-%d")
-                    time_str = now.strftime("%H:%M:%S")
-                    with open(DATA_FILE, "a", newline="") as f:
-                        writer = csv.writer(f)
-                        writer.writerow([date_str, time_str, SBP, DBP, pulse])
+                measurement_in_progress = False
 
-                    print(f"Measurement completed and saved: SBP={SBP}, DBP={DBP}, Pulse={pulse}")
-                    
-                    # Redirect to prevent duplicate submissions on refresh
-                    return redirect(url_for('show_result', sbp=SBP, dbp=DBP, pulse=pulse, timestamp=timestamp))
-                else:
-                    return f"Error analyzing pressure data: {analysis_response.text}"
+                # Redirect to result page
+                return redirect(url_for("show_result", sbp=SBP, dbp=DBP, pulse=pulse, timestamp=timestamp))
 
             else:
-                return f"Failed to trigger Arduino: {r.text}"
-                
-        except Exception as e:
-            print(f"Error contacting Arduino: {e}")
-            return f"Error contacting Arduino: {e}"
-        
-        finally:
-            # Always reset the flag when measurement is done (success or failure)
-            with measurement_lock:
+                message = "Failed to communicate with Arduino. Please try again."
                 measurement_in_progress = False
-                print("Measurement flag reset - ready for next measurement")
+                return render_template("measure.html", message=message)
 
-    return render_template("measure.html")
+        except Exception as e:
+            print(f"Error during measurement: {e}")
+            message = "An error occurred during measurement. Please try again."
+            measurement_in_progress = False
+            return render_template("measure.html", message=message)
+
+    return render_template("measure.html", message=message)
 
 @app.route("/result")
 def show_result():
@@ -209,6 +208,7 @@ def get_measurements():
                     measurements.append({
                         "date": row['Date'],
                         "time": row['Time'],
+                        "patient": row["Patient"],
                         "sbp": float(row['SBP']),
                         "dbp": float(row['DBP']),
                         "pulse": int(row['Pulse'])
@@ -225,148 +225,108 @@ def get_measurements():
 @app.route("/api/monthly-averages", methods=["GET"])
 def get_monthly_averages():
     """API endpoint to calculate monthly averages"""
-    if not os.path.exists(DATA_FILE):
-        return jsonify({"error": "No data file found"}), 404
-    
-    monthly_data = defaultdict(list)
-    
-    try:
-        with open(DATA_FILE, "r") as f:
+    patient = request.args.get("patient", "")
+    data = []
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Parse date and extract year-month
-                date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
-                month_key = date_obj.strftime('%Y-%m')  # Format: 2024-01
-                
-                monthly_data[month_key].append({
-                    'sbp': float(row['SBP']),
-                    'dbp': float(row['DBP']),
-                    'pulse': int(row['Pulse'])
-                })
-        
-        # Calculate averages for each month
-        monthly_averages = []
-        for month, readings in monthly_data.items():
-            if readings:  # Only process if there are readings
-                avg_sbp = sum(r['sbp'] for r in readings) / len(readings)
-                avg_dbp = sum(r['dbp'] for r in readings) / len(readings)
-                avg_pulse = sum(r['pulse'] for r in readings) / len(readings)
-                
-                monthly_averages.append({
-                    'month': month,
-                    'month_name': datetime.strptime(month, '%Y-%m').strftime('%B %Y'),
-                    'avg_sbp': round(avg_sbp, 1),
-                    'avg_dbp': round(avg_dbp, 1),
-                    'avg_pulse': round(avg_pulse, 1),
-                    'count': len(readings)
-                })
-        
-        # Sort by month (newest first)
-        monthly_averages.sort(key=lambda x: x['month'], reverse=True)
-        
-        print(f"Calculated averages for {len(monthly_averages)} months")
-        return jsonify({"monthly_averages": monthly_averages})
-        
-    except Exception as e:
-        print(f"Error calculating monthly averages: {e}")
-        return jsonify({"error": str(e)}), 500
+                if patient and row["Patient"] != patient:
+                    continue
+                data.append(row)
+    # Group by month
+    from collections import defaultdict
+    import calendar
+    monthly = defaultdict(list)
+    for row in data:
+        month = row["Date"][:7]  # YYYY-MM
+        monthly[month].append(row)
+    result = []
+    for month, rows in sorted(monthly.items()):
+        sbps = [float(r["SBP"]) for r in rows]
+        dbps = [float(r["DBP"]) for r in rows]
+        pulses = [int(r["Pulse"]) for r in rows]
+        count = len(rows)
+        year, m = month.split('-')
+        month_name = f"{calendar.month_name[int(m)]} {year}"
+        result.append({
+            "month": month,
+            "month_name": month_name,
+            "avg_sbp": round(sum(sbps)/count, 1) if count else 0,
+            "avg_dbp": round(sum(dbps)/count, 1) if count else 0,
+            "avg_pulse": round(sum(pulses)/count, 1) if count else 0,
+            "count": count
+        })
+    return jsonify({"monthly_averages": result})
 
 
 @app.route("/api/daily-averages", methods=["GET"])
-def get_daily_averages():
-    """API endpoint to get daily averages for a specific period"""
-    if not os.path.exists(DATA_FILE):
-        return jsonify({"error": "No data file found"}), 404
-    
-    period = request.args.get('period', 'month')  # 'week' or 'month'
-    date_str = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))  # specific date to center on
-    
+def daily_averages():
+    """API endpoint to get daily averages for a period, with optional patient filter"""
+    import datetime
+    from collections import defaultdict
+
+    patient = request.args.get("patient", "")
+    period = request.args.get("period", "month")
+    date_str = request.args.get("date", datetime.date.today().isoformat())
     try:
-        # Parse the reference date
-        ref_date = datetime.strptime(date_str, '%Y-%m-%d')
-        
-        # Calculate date range based on period
-        if period == 'week':
-            # Get start of week (Monday)
-            start_date = ref_date - timedelta(days=ref_date.weekday())
-            end_date = start_date + timedelta(days=6)
-        else:  # month
-            # Get start and end of month
-            start_date = ref_date.replace(day=1)
-            if ref_date.month == 12:
-                end_date = start_date.replace(year=ref_date.year + 1, month=1) - timedelta(days=1)
-            else:
-                end_date = start_date.replace(month=ref_date.month + 1) - timedelta(days=1)
-        
-        # Read measurements and group by date
-        daily_data = defaultdict(list)
-        
-        with open(DATA_FILE, "r") as f:
+        base_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except Exception:
+        base_date = datetime.date.today()
+
+    # Determine date range
+    if period == "week":
+        start_date = base_date - datetime.timedelta(days=base_date.weekday())
+        end_date = start_date + datetime.timedelta(days=6)
+        period_name = "This Week"
+    else:  # month
+        start_date = base_date.replace(day=1)
+        if start_date.month == 12:
+            end_date = start_date.replace(year=start_date.year+1, month=1, day=1) - datetime.timedelta(days=1)
+        else:
+            end_date = start_date.replace(month=start_date.month+1, day=1) - datetime.timedelta(days=1)
+        period_name = "This Month"
+
+    # Read and filter data
+    data = []
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                measurement_date = datetime.strptime(row['Date'], '%Y-%m-%d')
-                
-                # Only include measurements within the date range
-                if start_date <= measurement_date <= end_date:
-                    daily_data[row['Date']].append({
-                        'sbp': float(row['SBP']),
-                        'dbp': float(row['DBP']),
-                        'pulse': int(row['Pulse']),
-                        'time': row['Time']
-                    })
-        
-        # Calculate daily averages
-        daily_averages = []
-        current_date = start_date
-        
-        while current_date <= end_date:
-            date_str = current_date.strftime('%Y-%m-%d')
-            day_name = current_date.strftime('%A')
-            
-            if date_str in daily_data:
-                readings = daily_data[date_str]
-                avg_sbp = sum(r['sbp'] for r in readings) / len(readings)
-                avg_dbp = sum(r['dbp'] for r in readings) / len(readings)
-                avg_pulse = sum(r['pulse'] for r in readings) / len(readings)
-                
-                daily_averages.append({
-                    'date': date_str,
-                    'day_name': day_name,
-                    'display_date': current_date.strftime('%m/%d'),
-                    'avg_sbp': round(avg_sbp, 1),
-                    'avg_dbp': round(avg_dbp, 1),
-                    'avg_pulse': round(avg_pulse, 1),
-                    'count': len(readings),
-                    'readings': readings
-                })
-            else:
-                # Include days with no readings for complete timeline
-                daily_averages.append({
-                    'date': date_str,
-                    'day_name': day_name,
-                    'display_date': current_date.strftime('%m/%d'),
-                    'avg_sbp': None,
-                    'avg_dbp': None,
-                    'avg_pulse': None,
-                    'count': 0,
-                    'readings': []
-                })
-            
-            current_date += timedelta(days=1)
-        
-        period_name = f"{start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}"
-        
-        return jsonify({
-            "daily_averages": daily_averages,
-            "period": period,
-            "period_name": period_name,
-            "start_date": start_date.strftime('%Y-%m-%d'),
-            "end_date": end_date.strftime('%Y-%m-%d')
+                if patient and row["Patient"] != patient:
+                    continue
+                try:
+                    row_date = datetime.datetime.strptime(row["Date"], "%Y-%m-%d").date()
+                except Exception:
+                    continue
+                if start_date <= row_date <= end_date:
+                    data.append(row)
+
+    # Group by day
+    daily = defaultdict(list)
+    for row in data:
+        daily[row["Date"]].append(row)
+
+    # Prepare output for each day in range
+    result = []
+    for i in range((end_date - start_date).days + 1):
+        day = start_date + datetime.timedelta(days=i)
+        day_str = day.isoformat()
+        rows = daily.get(day_str, [])
+        count = len(rows)
+        sbps = [float(r["SBP"]) for r in rows]
+        dbps = [float(r["DBP"]) for r in rows]
+        pulses = [int(r["Pulse"]) for r in rows]
+        result.append({
+            "date": day_str,
+            "display_date": day.strftime("%d/%m"),
+            "day_name": day.strftime("%A"),
+            "avg_sbp": round(sum(sbps)/count, 1) if count else None,
+            "avg_dbp": round(sum(dbps)/count, 1) if count else None,
+            "avg_pulse": round(sum(pulses)/count, 1) if count else None,
+            "count": count
         })
-        
-    except Exception as e:
-        print(f"Error calculating daily averages: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"daily_averages": result, "period": period_name})
 
 @app.route("/debug/csv")
 def debug_csv():

@@ -167,6 +167,14 @@
             <a href="/calendar">Calendar</a>
         </div>
 
+        <!-- Patient Filter Dropdown -->
+        <div class="period-controls">
+            <label for="patient-filter">Filter by Patient:</label>
+            <select id="patient-filter" onchange="filterCalendarByPatient()">
+                <option value="">All</option>
+            </select>
+        </div>
+
         <div id="calendar">
             <h2>Blood Pressure Measurements Calendar</h2>
             <div id="fullcalendar"></div>
@@ -214,8 +222,9 @@
         let calendar;
         let averagesChart;
         let dailyChart;
+        let allEvents = [];
+        let allMeasurements = [];
 
-        // Initialize the calendar when page loads
         document.addEventListener('DOMContentLoaded', async function() {
             await initializeCalendar();
             initializeDateInput();
@@ -224,29 +233,33 @@
 
         async function initializeCalendar() {
             const calendarEl = document.getElementById('fullcalendar');
-            
-            // Load measurements from API
             let calendarEvents = [];
             try {
                 const response = await fetch('/api/measurements');
                 const data = await response.json();
-                
-                if (data.measurements && data.measurements.length > 0) {
-                    calendarEvents = data.measurements.map(measurement => ({
-                        title: `SBP: ${measurement.sbp} | DBP: ${measurement.dbp} | Pulse: ${measurement.pulse}`,
-                        start: `${measurement.date}T${measurement.time}`,
-                        extendedProps: {
-                            SBP: measurement.sbp,
-                            DBP: measurement.dbp,
-                            Pulse: measurement.pulse,
-                            Date: measurement.date,
-                            Time: measurement.time
-                        }
-                    }));
-                    console.log(`Loaded ${calendarEvents.length} events for calendar`);
-                } else {
-                    console.log('No measurements found for calendar');
-                }
+                allMeasurements = data.measurements || [];
+                calendarEvents = allMeasurements.map(measurement => ({
+                    title: `SBP: ${measurement.sbp} | DBP: ${measurement.dbp} | Pulse: ${measurement.pulse}`,
+                    start: `${measurement.date}T${measurement.time}`,
+                    extendedProps: {
+                        SBP: measurement.sbp,
+                        DBP: measurement.dbp,
+                        Pulse: measurement.pulse,
+                        Date: measurement.date,
+                        Time: measurement.time,
+                        Patient: measurement.patient // <-- For filtering
+                    }
+                }));
+                allEvents = calendarEvents;
+
+                // Populate patient filter dropdown
+                const patientSet = new Set(allEvents.map(e => e.extendedProps.Patient));
+                const filter = document.getElementById('patient-filter');
+                filter.innerHTML = '<option value="">All</option>';
+                patientSet.forEach(name => {
+                    if (name) filter.innerHTML += `<option value="${name}">${name}</option>`;
+                });
+
             } catch (error) {
                 console.error('Error loading calendar events:', error);
             }
@@ -258,7 +271,7 @@
                     center: 'title',
                     right: 'dayGridMonth,dayGridWeek'
                 },
-                events: calendarEvents,
+                events: allEvents,
                 eventClick: function(info) {
                     const props = info.event.extendedProps;
                     alert(`Blood Pressure Reading:
@@ -266,7 +279,8 @@ Date: ${props.Date}
 Time: ${props.Time}
 SBP: ${props.SBP} mmHg
 DBP: ${props.DBP} mmHg
-Pulse: ${props.Pulse} bpm`);
+Pulse: ${props.Pulse} bpm
+Patient: ${props.Patient || ''}`);
                 },
                 eventColor: '#0077cc'
             });
@@ -274,55 +288,55 @@ Pulse: ${props.Pulse} bpm`);
             calendar.render();
         }
 
-        async function calculateMonthlyAverages() {
-            const button = document.getElementById('calculate-averages');
-            const statusDiv = document.getElementById('status-message');
-            
-            // Show loading state
-            button.disabled = true;
-            button.textContent = 'Calculating...';
-            showStatus('Fetching measurement data...', 'info');
-            
-            try {
-                console.log('Fetching monthly averages from API...');
-                const response = await fetch('/api/monthly-averages');
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('API Response:', data);
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
-                if (!data.monthly_averages || data.monthly_averages.length === 0) {
-                    showStatus('No measurements found. Please take some measurements first.', 'info');
-                    return;
-                }
-                
-                console.log(`Found ${data.monthly_averages.length} months of data`);
-                
-                // Display the results
-                displayMonthlyAverages(data.monthly_averages);
-                createChart(data.monthly_averages);
-                showStatus(`Successfully calculated averages for ${data.monthly_averages.length} months`, 'success');
-                
-            } catch (error) {
-                console.error('Error calculating monthly averages:', error);
-                showStatus(`Error: ${error.message}`, 'error');
-            } finally {
-                // Reset button state
-                button.disabled = false;
-                button.textContent = 'Calculate Monthly Averages';
+        function filterCalendarByPatient() {
+            const selected = document.getElementById('patient-filter').value;
+            let filteredEvents = allEvents;
+            let filteredMeasurements = allMeasurements;
+            if (selected) {
+                filteredEvents = allEvents.filter(e => e.extendedProps.Patient === selected);
+                filteredMeasurements = allMeasurements.filter(m => m.patient === selected);
             }
+            calendar.removeAllEvents();
+            calendar.addEventSource(filteredEvents);
+
+            // Update charts as well
+            //drawMonthlyAveragesChart(filteredMeasurements);
+            //drawDailyAveragesChart(filteredMeasurements);
         }
+
+        // --- Daily and Monthly Chart Logic (unchanged from your original) ---
+
+         async function calculateMonthlyAverages() {
+    const button = document.getElementById('calculate-averages');
+    const selected = document.getElementById('patient-filter').value;
+    const url = selected ? `/api/monthly-averages?patient=${encodeURIComponent(selected)}` : '/api/monthly-averages';
+
+    button.disabled = true;
+    button.textContent = 'Calculating...';
+    showStatus('Fetching measurement data...', 'info');
+
+    try {
+        const response = await fetch(url); // <-- use the url with patient filter
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        if (!data.monthly_averages || data.monthly_averages.length === 0) {
+            showStatus('No measurements found. Please take some measurements first.', 'info');
+            return;
+        }
+        displayMonthlyAverages(data.monthly_averages);
+        createChart(data.monthly_averages);
+        showStatus(`Successfully calculated averages for ${data.monthly_averages.length} months`, 'success');
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = 'Calculate Monthly Averages';
+    }
+}
 
         function displayMonthlyAverages(averages) {
             const container = document.getElementById('averages-table-container');
-            
             let tableHtml = `
                 <table class="averages-table">
                     <thead>
@@ -336,7 +350,6 @@ Pulse: ${props.Pulse} bpm`);
                     </thead>
                     <tbody>
             `;
-            
             averages.forEach(avg => {
                 tableHtml += `
                     <tr>
@@ -348,26 +361,14 @@ Pulse: ${props.Pulse} bpm`);
                     </tr>
                 `;
             });
-            
-            tableHtml += `
-                    </tbody>
-                </table>
-            `;
-            
+            tableHtml += `</tbody></table>`;
             container.innerHTML = tableHtml;
         }
 
         function createChart(averages) {
             const ctx = document.getElementById('averagesChart').getContext('2d');
-            
-            // Destroy existing chart if it exists
-            if (averagesChart) {
-                averagesChart.destroy();
-            }
-            
-            // Reverse the order for chronological display (oldest to newest)
+            if (averagesChart) averagesChart.destroy();
             const reversedAverages = [...averages].reverse();
-            
             averagesChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -447,97 +448,51 @@ Pulse: ${props.Pulse} bpm`);
         function showStatus(message, type) {
             const statusDiv = document.getElementById('status-message');
             statusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
-            
-            // Auto-hide success messages after 5 seconds
             if (type === 'success') {
-                setTimeout(() => {
-                    statusDiv.innerHTML = '';
-                }, 5000);
-            }
-        }
-
-        // Debug function to test API connectivity
-        async function debugAPI() {
-            try {
-                console.log('Testing /api/measurements endpoint...');
-                const response = await fetch('/api/measurements');
-                const data = await response.json();
-                console.log('Measurements API response:', data);
-                
-                console.log('Testing /debug/csv endpoint...');
-                const csvResponse = await fetch('/debug/csv');
-                const csvText = await csvResponse.text();
-                console.log('CSV Debug response:', csvText);
-                
-            } catch (error) {
-                console.error('Debug API test failed:', error);
+                setTimeout(() => { statusDiv.innerHTML = ''; }, 5000);
             }
         }
 
         function initializeDateInput() {
-            // Set date input to today
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date-input').value = today;
         }
 
         function updatePeriod() {
-            // Called when period or date changes
             loadDailyAverages();
         }
 
         async function loadDailyAverages() {
-            const period = document.getElementById('period-select').value;
-            const date = document.getElementById('date-input').value;
-            const statusDiv = document.getElementById('daily-status-message');
-            
-            showDailyStatus('Loading daily averages...', 'info');
-            
-            try {
-                console.log(`Fetching daily averages for ${period} around ${date}...`);
-                const response = await fetch(`/api/daily-averages?period=${period}&date=${date}`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('Daily averages API response:', data);
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
-                if (!data.daily_averages || data.daily_averages.length === 0) {
-                    showDailyStatus('No measurements found for this period.', 'info');
-                    return;
-                }
-                
-                // Count days with actual measurements
-                const daysWithData = data.daily_averages.filter(day => day.count > 0).length;
-                
-                createDailyChart(data.daily_averages, data.period_name);
-                showDailyStatus(`Showing ${data.period_name} (${daysWithData} days with measurements)`, 'success');
-                
-            } catch (error) {
-                console.error('Error loading daily averages:', error);
-                showDailyStatus(`Error: ${error.message}`, 'error');
-            }
+    const period = document.getElementById('period-select').value;
+    const date = document.getElementById('date-input').value;
+    const selected = document.getElementById('patient-filter').value; // <-- get selected patient
+    let url = `/api/daily-averages?period=${period}&date=${date}`;
+    if (selected) url += `&patient=${encodeURIComponent(selected)}`; // <-- add patient filter
+    showDailyStatus('Loading daily averages...', 'info');
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        if (!data.daily_averages || data.daily_averages.length === 0) {
+            showDailyStatus('No measurements found for this period.', 'info');
+            return;
         }
+        const daysWithData = data.daily_averages.filter(day => day.count > 0).length;
+        createDailyChart(data.daily_averages, data.period_name);
+        showDailyStatus(`Showing ${data.period_name} (${daysWithData} days with measurements)`, 'success');
+    } catch (error) {
+        showDailyStatus(`Error: ${error.message}`, 'error');
+    }
+}
 
         function createDailyChart(dailyData, periodName) {
             const ctx = document.getElementById('dailyChart').getContext('2d');
-            
-            // Destroy existing chart if it exists
-            if (dailyChart) {
-                dailyChart.destroy();
-            }
-            
-            // Prepare data - only include days with measurements for the line
+            if (dailyChart) dailyChart.destroy();
             const labels = dailyData.map(day => day.display_date);
             const sbpData = dailyData.map(day => day.avg_sbp);
             const dbpData = dailyData.map(day => day.avg_dbp);
             const pulseData = dailyData.map(day => day.avg_pulse);
-            
             dailyChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -552,7 +507,7 @@ Pulse: ${props.Pulse} bpm`);
                             tension: 0.1,
                             pointRadius: 6,
                             pointHoverRadius: 8,
-                            connectNulls: false // Don't connect points across null values
+                            connectNulls: false
                         },
                         {
                             label: 'Diastolic BP (mmHg)',
@@ -590,9 +545,7 @@ Pulse: ${props.Pulse} bpm`);
                         title: {
                             display: true,
                             text: `Daily Blood Pressure Averages - ${periodName}`,
-                            font: {
-                                size: 16
-                            }
+                            font: { size: 16 }
                         },
                         legend: {
                             display: true,
@@ -618,19 +571,13 @@ Pulse: ${props.Pulse} bpm`);
                     },
                     scales: {
                         x: {
-                            title: {
-                                display: true,
-                                text: 'Date'
-                            }
+                            title: { display: true, text: 'Date' }
                         },
                         y: {
                             type: 'linear',
                             display: true,
                             position: 'left',
-                            title: {
-                                display: true,
-                                text: 'Blood Pressure (mmHg)'
-                            },
+                            title: { display: true, text: 'Blood Pressure (mmHg)' },
                             min: 40,
                             max: 180
                         },
@@ -638,15 +585,10 @@ Pulse: ${props.Pulse} bpm`);
                             type: 'linear',
                             display: true,
                             position: 'right',
-                            title: {
-                                display: true,
-                                text: 'Pulse (bpm)'
-                            },
+                            title: { display: true, text: 'Pulse (bpm)' },
                             min: 40,
                             max: 120,
-                            grid: {
-                                drawOnChartArea: false,
-                            },
+                            grid: { drawOnChartArea: false }
                         }
                     }
                 }
@@ -656,13 +598,81 @@ Pulse: ${props.Pulse} bpm`);
         function showDailyStatus(message, type) {
             const statusDiv = document.getElementById('daily-status-message');
             statusDiv.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
-            
-            // Auto-hide success messages after 5 seconds
             if (type === 'success') {
-                setTimeout(() => {
-                    statusDiv.innerHTML = '';
-                }, 5000);
+                setTimeout(() => { statusDiv.innerHTML = ''; }, 5000);
             }
+        }
+
+        // For patient filter: update charts when filtering
+        function drawMonthlyAveragesChart(measurements) {
+            // Group by month
+            const monthly = {};
+            measurements.forEach(m => {
+                const month = m.date.slice(0, 7); // YYYY-MM
+                if (!monthly[month]) monthly[month] = [];
+                monthly[month].push(m);
+            });
+            const labels = Object.keys(monthly).sort();
+            const sbp = labels.map(month => avg(monthly[month].map(m => m.sbp)));
+            const dbp = labels.map(month => avg(monthly[month].map(m => m.dbp)));
+            const pulse = labels.map(month => avg(monthly[month].map(m => m.pulse)));
+
+            // Table
+            let tableHtml = `<table class="averages-table"><tr><th>Month</th><th>SBP</th><th>DBP</th><th>Pulse</th></tr>`;
+            labels.forEach((month, i) => {
+                tableHtml += `<tr><td>${month}</td><td>${sbp[i].toFixed(1)}</td><td>${dbp[i].toFixed(1)}</td><td>${pulse[i].toFixed(1)}</td></tr>`;
+            });
+            tableHtml += `</table>`;
+            document.getElementById('averages-table-container').innerHTML = tableHtml;
+
+            // Chart
+            if (averagesChart) averagesChart.destroy();
+            const ctx = document.getElementById('averagesChart').getContext('2d');
+            averagesChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'SBP', data: sbp, borderColor: '#0077cc', fill: false },
+                        { label: 'DBP', data: dbp, borderColor: '#cc0000', fill: false },
+                        { label: 'Pulse', data: pulse, borderColor: '#00cc77', fill: false }
+                    ]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        function drawDailyAveragesChart(measurements) {
+            // Group by day
+            const daily = {};
+            measurements.forEach(m => {
+                if (!daily[m.date]) daily[m.date] = [];
+                daily[m.date].push(m);
+            });
+            const labels = Object.keys(daily).sort();
+            const sbp = labels.map(day => avg(daily[day].map(m => m.sbp)));
+            const dbp = labels.map(day => avg(daily[day].map(m => m.dbp)));
+            const pulse = labels.map(day => avg(daily[day].map(m => m.pulse)));
+
+            if (dailyChart) dailyChart.destroy();
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'SBP', data: sbp, borderColor: '#0077cc', fill: false },
+                        { label: 'DBP', data: dbp, borderColor: '#cc0000', fill: false },
+                        { label: 'Pulse', data: pulse, borderColor: '#00cc77', fill: false }
+                    ]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        function avg(arr) {
+            if (!arr.length) return 0;
+            return arr.reduce((a, b) => a + b, 0) / arr.length;
         }
     </script>
 </body>
